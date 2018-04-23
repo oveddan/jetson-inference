@@ -19,7 +19,7 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  */
- 
+
 #include "tensorNet.h"
 #include "cudaMappedMemory.h"
 #include "cudaResize.h"
@@ -43,13 +43,7 @@ tensorNet::tensorNet()
 	mEngine  = NULL;
 	mInfer   = NULL;
 	mContext = NULL;
-	
-	mWidth          = 0;
-	mHeight         = 0;
-	mInputSize      = 0;
-	mMaxBatchSize   = 0;
-	mInputCPU       = NULL;
-	mInputCUDA      = NULL;
+
 	mEnableDebug    = false;
 	mEnableProfiler = false;
 	mEnableFP16     = false;
@@ -69,7 +63,7 @@ tensorNet::~tensorNet()
 		mEngine->destroy();
 		mEngine = NULL;
 	}
-		
+
 	if( mInfer != NULL )
 	{
 		mInfer->destroy();
@@ -104,7 +98,7 @@ void tensorNet::DisableFP16()
 
 // Create an optimized GIE network from caffe prototxt and model file
 bool tensorNet::ProfileModel(const std::string& deployFile,			   // name for caffe prototxt
-					         const std::string& modelFile,			   // name for model 
+					         const std::string& modelFile,			   // name for model
 					         const std::vector<std::string>& outputs,   // network outputs
 					         unsigned int maxBatchSize,				   // batch size - NB must be at least as large as the batch we want to run with)
 					         std::ostream& gieModelStream)			   // output stream for the GIE model
@@ -123,7 +117,7 @@ bool tensorNet::ProfileModel(const std::string& deployFile,			   // name for caf
 	mEnableFP16 = (mOverride16 == true) ? false : builder->platformHasFastFp16();
 	printf(LOG_GIE "platform %s FP16 support.\n", mEnableFP16 ? "has" : "does not have");
 	printf(LOG_GIE "loading %s %s\n", deployFile.c_str(), modelFile.c_str());
-	
+
 	nvinfer1::DataType modelDataType = mEnableFP16 ? nvinfer1::DataType::kHALF : nvinfer1::DataType::kFLOAT; // create a 16-bit model if it's natively supported
 	const nvcaffeparser1::IBlobNameToTensor *blobNameToTensor =
 		parser->parse(deployFile.c_str(),		// caffe deploy file
@@ -136,14 +130,14 @@ bool tensorNet::ProfileModel(const std::string& deployFile,			   // name for caf
 		printf(LOG_GIE "failed to parse caffe network\n");
 		return false;
 	}
-	
-	// the caffe file has no notion of outputs, so we need to manually say which tensors the engine should generate	
+
+	// the caffe file has no notion of outputs, so we need to manually say which tensors the engine should generate
 	const size_t num_outputs = outputs.size();
-	
+
 	for( size_t n=0; n < num_outputs; n++ )
 	{
 		nvinfer1::ITensor* tensor = blobNameToTensor->find(outputs[n].c_str());
-	
+
 		if( !tensor )
 			printf(LOG_GIE "failed to retrieve tensor for output '%s'\n", outputs[n].c_str());
 		else
@@ -154,7 +148,7 @@ bool tensorNet::ProfileModel(const std::string& deployFile,			   // name for caf
 
 	// Build the engine
 	printf(LOG_GIE "configuring CUDA engine\n");
-		
+
 	builder->setMaxBatchSize(maxBatchSize);
 	builder->setMaxWorkspaceSize(16 << 20);
 
@@ -164,7 +158,7 @@ bool tensorNet::ProfileModel(const std::string& deployFile,			   // name for caf
 
 	printf(LOG_GIE "building CUDA engine\n");
 	nvinfer1::ICudaEngine* engine = builder->buildCudaEngine(*network);
-	
+
 	if( !engine )
 	{
 		printf(LOG_GIE "failed to build CUDA engine\n");
@@ -193,32 +187,21 @@ bool tensorNet::ProfileModel(const std::string& deployFile,			   // name for caf
 #endif
 	engine->destroy();
 	builder->destroy();
-	
+
 	return true;
 }
 
 
 // LoadNetwork
-bool tensorNet::LoadNetwork( const char* prototxt_path, const char* model_path, const char* mean_path, 
-							 const char* input_blob, const char* output_blob, uint32_t maxBatchSize )
-{
-	std::vector<std::string> outputs;
-	outputs.push_back(output_blob);
-	
-	return LoadNetwork(prototxt_path, model_path, mean_path, input_blob, outputs, maxBatchSize );
-}
-
-				  
-// LoadNetwork
-bool tensorNet::LoadNetwork( const char* prototxt_path, const char* model_path, const char* mean_path, 
-							 const char* input_blob, const std::vector<std::string>& output_blobs, 
+bool tensorNet::LoadNetwork( const char* prototxt_path, const char* model_path,
+							 const std::vector<std::string>&  input_blobs, const std::vector<std::string>& output_blobs,
 							 uint32_t maxBatchSize )
 {
 	if( !prototxt_path || !model_path )
 		return false;
-	
+
 	printf(LOG_GIE "TensorRT version %u.%u, build %u\n", NV_TENSORRT_MAJOR, NV_TENSORRT_MINOR, NV_GIE_VERSION);
-	
+
 	/*
 	 * attempt to load network from cache before profiling with tensorRT
 	 */
@@ -228,19 +211,19 @@ bool tensorNet::LoadNetwork( const char* prototxt_path, const char* model_path, 
 	char cache_path[512];
 	sprintf(cache_path, "%s.%u.tensorcache", model_path, maxBatchSize);
 	printf(LOG_GIE "attempting to open cache file %s\n", cache_path);
-	
+
 	std::ifstream cache( cache_path );
 
 	if( !cache )
 	{
 		printf(LOG_GIE "cache file not found, profiling network model\n");
-	
+
 		if( !ProfileModel(prototxt_path, model_path, output_blobs, maxBatchSize, gieModelStream) )
 		{
 			printf("failed to load %s\n", model_path);
 			return 0;
 		}
-	
+
 		printf(LOG_GIE "network profiling complete, writing cache to %s\n", cache_path);
 		std::ofstream outFile;
 		outFile.open(cache_path);
@@ -257,30 +240,30 @@ bool tensorNet::LoadNetwork( const char* prototxt_path, const char* model_path, 
 
 		// test for half FP16 support
 		nvinfer1::IBuilder* builder = CREATE_INFER_BUILDER(gLogger);
-		
+
 		if( builder != NULL )
 		{
 			mEnableFP16 = !mOverride16 && builder->platformHasFastFp16();
 			printf(LOG_GIE "platform %s FP16 support.\n", mEnableFP16 ? "has" : "does not have");
-			builder->destroy();	
+			builder->destroy();
 		}
 	}
 
 	printf(LOG_GIE "%s loaded\n", model_path);
-	
 
-	
+
+
 	/*
 	 * create runtime inference engine execution context
 	 */
 	nvinfer1::IRuntime* infer = CREATE_INFER_RUNTIME(gLogger);
-	
+
 	if( !infer )
 	{
 		printf(LOG_GIE "failed to create InferRuntime\n");
 		return 0;
 	}
-	
+
 #if NV_TENSORRT_MAJOR > 1
 	// support for stringstream deserialization was deprecated in TensorRT v2
 	// instead, read the stringstream into a memory buffer and pass that to TRT.
@@ -309,9 +292,9 @@ bool tensorNet::LoadNetwork( const char* prototxt_path, const char* model_path, 
 		printf(LOG_GIE "failed to create CUDA engine\n");
 		return 0;
 	}
-	
+
 	nvinfer1::IExecutionContext* context = engine->createExecutionContext();
-	
+
 	if( !context )
 	{
 		printf(LOG_GIE "failed to create execution context\n");
@@ -328,48 +311,81 @@ bool tensorNet::LoadNetwork( const char* prototxt_path, const char* model_path, 
 		context->setProfiler(&gProfiler);
 
 	printf(LOG_GIE "CUDA engine context initialized with %u bindings\n", engine->getNbBindings());
-	
+
 	mInfer   = infer;
 	mEngine  = engine;
 	mContext = context;
-	
-	
-	/*
-	 * determine dimensions of network input bindings
-	 */
-	const int inputIndex = engine->getBindingIndex(input_blob);
-	
-	printf(LOG_GIE "%s input  binding index:  %i\n", model_path, inputIndex);
-	
+
+  int maxBindings = engine->getNbBindings();
+
+  printf("number of bindings %i\n", maxBindings);
+  printf("%s %s %s %s %s\n", engine->getBindingName(0), engine->getBindingName(1), engine->getBindingName(2), engine->getBindingName(3), engine->getBindingName(4));
+
+  int numInputs = input_blobs.size();
+  for(int n = 0; n < numInputs; n++) {
+    /*
+     * determine dimensions of network input bindings
+     */
+
+    const int inputIndex = engine->getBindingIndex(input_blobs[n].c_str());
+
+    if (inputIndex == -1) {
+      printf("failed to get index for %s\n", input_blobs[n].c_str());
+      return false;
+    }
+
+    printf(LOG_GIE "%s input  binding index:  %i\n", model_path, inputIndex);
+
 #if NV_TENSORRT_MAJOR > 1
-	nvinfer1::Dims inputDims = engine->getBindingDimensions(inputIndex);
+    nvinfer1::Dims inputDims = engine->getBindingDimensions(inputIndex);
 #else
-	Dims3 inputDims = engine->getBindingDimensions(inputIndex);
+    Dims3 inputDims = engine->getBindingDimensions(inputIndex);
 #endif
 
-	size_t inputSize  = maxBatchSize * DIMS_C(inputDims) * DIMS_H(inputDims) * DIMS_W(inputDims) * sizeof(float);
-	
-	printf(LOG_GIE "%s input  dims (b=%u c=%u h=%u w=%u) size=%zu\n", model_path, maxBatchSize, DIMS_C(inputDims), DIMS_H(inputDims), DIMS_W(inputDims), inputSize);
-	
-	/*
-	 * allocate memory to hold the input image
-	 */
-	if( !cudaAllocMapped((void**)&mInputCPU, (void**)&mInputCUDA, inputSize) )
-	{
-		printf("failed to alloc CUDA mapped memory for tensorNet input, %zu bytes\n", inputSize);
-		return false;
-	}
-	
-	mInputSize    = inputSize;
-	mWidth        = DIMS_W(inputDims);
-	mHeight       = DIMS_H(inputDims);
-	mMaxBatchSize = maxBatchSize;
-	
+    size_t inputSize  = maxBatchSize * DIMS_C(inputDims) * DIMS_H(inputDims) * DIMS_W(inputDims) * sizeof(float);
+
+    printf(LOG_GIE "%s input  dims (b=%u c=%u h=%u w=%u) size=%zu\n", model_path, maxBatchSize, DIMS_C(inputDims), DIMS_H(inputDims), DIMS_W(inputDims), inputSize);
+
+    // allocate input memory
+    void* inputCPU= NULL;
+    void* inputCUDA = NULL;
+
+    /*
+     * allocate memory to hold the input image
+     */
+    if( !cudaAllocMapped((void**)&inputCPU, (void**)&inputCUDA, inputSize) )
+    {
+      printf("failed to alloc CUDA mapped memory for tensorNet input %s, %zu bytes\n", input_blobs[n].c_str(), inputSize);
+      return false;
+    }
+
+    inputLayer l;
+
+    l.name = input_blobs[n];
+		l.CPU  = (float*)inputCPU;
+		l.CUDA = (float*)inputCUDA;
+    l.size = inputSize;
+    l.width        = DIMS_W(inputDims);
+    l.height       = DIMS_H(inputDims);
+
+    #if NV_TENSORRT_MAJOR > 1
+      DIMS_W(l.dims) = DIMS_W(inputDims);
+      DIMS_H(l.dims) = DIMS_H(inputDims);
+      DIMS_C(l.dims) = DIMS_C(inputDims);
+    #else
+      l.dims = inputDims;
+    #endif
+
+    mInputs.push_back(l);
+  }
+
+  mMaxBatchSize = maxBatchSize;
+
 	/*
 	 * setup network output buffers
 	 */
 	const int numOutputs = output_blobs.size();
-	
+
 	for( int n=0; n < numOutputs; n++ )
 	{
 		const int outputIndex = engine->getBindingIndex(output_blobs[n].c_str());
@@ -383,19 +399,19 @@ bool tensorNet::LoadNetwork( const char* prototxt_path, const char* model_path, 
 
 		size_t outputSize = maxBatchSize * DIMS_C(outputDims) * DIMS_H(outputDims) * DIMS_W(outputDims) * sizeof(float);
 		printf(LOG_GIE "%s output %i %s  dims (b=%u c=%u h=%u w=%u) size=%zu\n", model_path, n, output_blobs[n].c_str(), maxBatchSize, DIMS_C(outputDims), DIMS_H(outputDims), DIMS_W(outputDims), outputSize);
-	
-		// allocate output memory 
+
+		// allocate output memory
 		void* outputCPU  = NULL;
 		void* outputCUDA = NULL;
-		
+
 		if( !cudaAllocMapped((void**)&outputCPU, (void**)&outputCUDA, outputSize) )
 		{
 			printf("failed to alloc CUDA mapped memory for %u output classes\n", DIMS_C(outputDims));
 			return false;
 		}
-	
+
 		outputLayer l;
-		
+
 		l.CPU  = (float*)outputCPU;
 		l.CUDA = (float*)outputCUDA;
 		l.size = outputSize;
@@ -409,25 +425,14 @@ bool tensorNet::LoadNetwork( const char* prototxt_path, const char* model_path, 
 	#endif
 
 		l.name = output_blobs[n];
-		
+
 		mOutputs.push_back(l);
 	}
-	
 
-#if NV_TENSORRT_MAJOR > 1
-	DIMS_W(mInputDims) = DIMS_W(inputDims);
-	DIMS_H(mInputDims) = DIMS_H(inputDims);
-	DIMS_C(mInputDims) = DIMS_C(inputDims);
-#else
-	mInputDims      = inputDims;
-#endif
+
 	mPrototxtPath   = prototxt_path;
 	mModelPath      = model_path;
-	mInputBlobName  = input_blob;
-		
-	if( mean_path != NULL )
-		mMeanPath = mean_path;
-	
+
 	printf("%s initialized.\n", mModelPath.c_str());
 	return true;
 }
