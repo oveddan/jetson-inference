@@ -45,6 +45,33 @@
 
 using namespace dlib;
 
+rectangle get_bounding_box(const full_object_detection& d, unsigned long first_line, unsigned long last_line) {
+  long left = 5000;
+  long top = -5000;
+  long right = -5000;
+  long bottom = 5000;
+
+  point pnt;
+  for(unsigned long i = first_line - 1; i <= last_line; i++) {
+    pnt = d.part(i);
+
+    left = std::min(left, pnt.x());
+    right = std::max(right, pnt.x());
+    top = std::max(top, pnt.y());
+    bottom = std::min(bottom, pnt.y());
+  }
+// left eye
+      // for(unsigned long i = 37; i <= 41; i++) {
+        // lines.push_back(image_window::overlay_line(d.part(i), d.part(i-1), color));
+      // }
+
+      // // right eye
+      // for(unsigned long i = 43; i <= 47; i++) {
+        // lines.push_back(image_window::overlay_line(d.part(i), d.part(i-1), color));
+      // }
+
+  return rectangle(left, top, right, bottom);
+};
 
 bool signal_recieved = false;
 
@@ -196,24 +223,23 @@ int main( int argc, char** argv )
     printf("faces, detect time: %lu %f\n", faces.size(), float( clock () - begin_time ) / CLOCKS_PER_SEC);
     win.clear_overlay();
     win.set_image(cimg);
-    win.add_overlay(render_face_detections(shapes));
+    // win.add_overlay(render_face_detections(shapes));
 
     std::vector<image_window::overlay_line> lines;
     const rgb_pixel color = rgb_pixel(0,0,255);
     for(unsigned long i = 0; i < shapes.size(); i++) {
       const full_object_detection& d = shapes[i];
 
-      // left eye
-      for(unsigned long i = 37; i <= 41; i++) {
-        lines.push_back(image_window::overlay_line(d.part(i), d.part(i-1), color));
-      }
 
-      // right eye
-      for(unsigned long i = 43; i <= 47; i++) {
-        lines.push_back(image_window::overlay_line(d.part(i), d.part(i-1), color));
-      }
+      rectangle left_eye_box = get_bounding_box(d, 37, 41);
+
+      rectangle right_eye_box = get_bounding_box(d, 43, 47);
+
+      win.add_overlay(faces[i], color);
+      win.add_overlay(left_eye_box, color);
+      win.add_overlay(right_eye_box, color);
     }
-    win.add_overlay(lines);
+    // win.add_overlay(lines);
 
    // cv::imshow("frame", matPrevRGB);
     // cv::waitKey(0);
