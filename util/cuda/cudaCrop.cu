@@ -24,7 +24,7 @@
 
 // gpuCrop
 template <typename T>
-__global__ void gpuCrop( int left, int bottom, T* input, int iWidth, T* output, int oWidth, int oHeight )
+__global__ void gpuCrop( int left, int top, T* input, int iWidth, T* output, int oWidth, int oHeight )
 {
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
 	const int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -33,7 +33,7 @@ __global__ void gpuCrop( int left, int bottom, T* input, int iWidth, T* output, 
 		return;
 
 	const int dx = ((float)left);
-	const int dy = ((float)bottom);
+	const int dy = ((float)top);
 
 	const T px = input[ dy * iWidth + dx ];
 
@@ -42,7 +42,7 @@ __global__ void gpuCrop( int left, int bottom, T* input, int iWidth, T* output, 
 
 // cudaCropRGBA
 cudaError_t cudaCropRGBA( float4* input,  size_t inputWidth,  size_t inputHeight,
-				        float4* output, size_t left, size_t bottom, size_t outputWidth, size_t outputHeight )
+				        float4* output, size_t left, size_t top, size_t outputWidth, size_t outputHeight )
 {
 	if( !input || !output )
 		return cudaErrorInvalidDevicePointer;
@@ -54,7 +54,7 @@ cudaError_t cudaCropRGBA( float4* input,  size_t inputWidth,  size_t inputHeight
 	const dim3 blockDim(8, 8);
 	const dim3 gridDim(iDivUp(outputWidth,blockDim.x), iDivUp(outputHeight,blockDim.y));
 
-	gpuCrop<float4><<<gridDim, blockDim>>>(left, bottom, input, inputWidth, output, outputWidth, outputHeight);
+	gpuCrop<float4><<<gridDim, blockDim>>>(left, top, input, inputWidth, output, outputWidth, outputHeight);
 
 	return CUDA(cudaGetLastError());
 }

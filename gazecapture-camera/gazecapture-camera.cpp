@@ -35,9 +35,12 @@
 #include <signal.h>
 #include <unistd.h>
 
+#include "cudaMappedMemory.h"
 #include "cudaNormalize.h"
 // #include "cudaGrayscale.h"
 #include "cudaOverlay.h"
+#include "cudaCrop.h"
+#include "cudaResize.h"
 #include "cudaFont.h"
 #include "gazeNet.h"
 
@@ -52,7 +55,7 @@ rectangle get_bounding_box(const full_object_detection& d, unsigned long first_l
   long bottom = 5000;
 
   point pnt;
-  for(unsigned long i = first_line - 1; i <= last_line; i++) {
+  for(unsigned long i = first_line; i <= last_line; i++) {
     pnt = d.part(i);
 
     left = std::min(left, pnt.x());
@@ -60,18 +63,20 @@ rectangle get_bounding_box(const full_object_detection& d, unsigned long first_l
     top = std::max(top, pnt.y());
     bottom = std::min(bottom, pnt.y());
   }
-// left eye
-      // for(unsigned long i = 37; i <= 41; i++) {
-        // lines.push_back(image_window::overlay_line(d.part(i), d.part(i-1), color));
-      // }
-
-      // // right eye
-      // for(unsigned long i = 43; i <= 47; i++) {
-        // lines.push_back(image_window::overlay_line(d.part(i), d.part(i-1), color));
-      // }
-
   return rectangle(left, top, right, bottom);
 };
+
+rectangle to_square(const rectangle& rect) {
+  point center = dlib::center(rect);
+
+  long width = rect.right() - rect.left();
+  long height = rect.top() - rect.bottom();
+  long size = std::max(width, height);
+
+  return dlib::centered_rect(
+    center.x(), center.y(), size, size
+  );
+}
 
 bool signal_recieved = false;
 
@@ -130,12 +135,37 @@ int main( int argc, char** argv )
 		return 0;
 	}
 
+	/*
+	 * allocate memory for output gazes
+	 */
+	const uint32_t maxGazes= net->GetMaxGazes();		printf("maximum gazes:  %u\n", maxGazes);
+
+  float* gazesCPU    = NULL;
+	float* gazesCUDA   = NULL;
+  void* imgFace = NULL;
+  void* imgFaceCPU = NULL;
+  float* imgLeftEye = NULL;
+  float* imgRightEye = NULL;
+  float* faceGrid = NULL;
+
+ if( !cudaAllocMapped((void**)&imgFaceCPU, (void**)&imgFace, 244 * 244 * sizeof(float4)) )
+  {
+    printf("gazecapture-camera:  failed to alloc output memory\n");
+    return 0;
+  }
+
+	// if( !cudaAllocMapped((void**)&gazesCPU, (void**)&gazesCUDA, maxGazes * sizeof(float2)) )
+	// {
+		// printf("gazecapture-camera:  failed to alloc output memory\n");
+		// return 0;
+	// }
 
 	/*
 	 * create openGL window
 	 */
 	glDisplay* display = glDisplay::Create();
 	glTexture* texture = NULL;
+	glTexture* faceTexture = NULL;
 
 	if( !display ) {
 		printf("\ngazenet-camera:  failed to create openGL display\n");
@@ -146,6 +176,12 @@ int main( int argc, char** argv )
 
 		if( !texture )
 			printf("gazenet-camera:  failed to create openGL texture\n");
+
+    faceTexture = glTexture::Create(244, 244, GL_RGBA32F_ARB/*GL_RGBA8*/);
+
+		if( !faceTexture )
+			printf("gazenet-camera:  failed to create openGL texture\n");
+
 	}
 
 
@@ -176,9 +212,11 @@ int main( int argc, char** argv )
   shape_predictor pose_model;
   deserialize("networks/shape_predictor_68_face_landmarks.dat") >> pose_model;
 
-  cv::namedWindow( "frame", CV_WINDOW_AUTOSIZE );
+  // cv::namedWindow( "frame", CV_WINDOW_AUTOSIZE );
 
   image_window win;
+
+  float detectionScale = 0.5;
 
 	while( !signal_recieved )
 	{
@@ -200,69 +238,93 @@ int main( int argc, char** argv )
     clock_t begin_time = clock();
     cv::Mat matPrevRGB = cv::Mat(camera->GetHeight(), camera->GetWidth(), CV_8UC3, (char*)imgCPU, cv::Mat::AUTO_STEP);
     cv::Mat res;
-    cv::resize(matPrevRGB, res, cv::Size(), 0.5, .5);
+    cv::resize(matPrevRGB, res, cv::Size(), detectionScale, detectionScale);
     std::time_t e = std::time(0);
     printf("New size, time: %f %f %f\n", float( clock () - begin_time ) / CLOCKS_PER_SEC, camera->GetHeight()*.5, camera->GetWidth()*.5);
 
-    // cv::Mat matPrevRGB;
-    // cv::cvtColor(matPrev, matPrevRGB, CV_RGB2BGR);
-
-    // // cv::Mat mat2;
-    // cv::cvtColor(matRGBA, mat2, CV_RGB2BGR);
-
-    // void* imgGrayscale = NULL;
     begin_time = clock();
 
     cv_image<rgb_pixel> cimg(res);
     std::vector<rectangle> faces = detector(cimg);
     std::vector<full_object_detection> shapes;
-     // Display it all on the screen
     for(unsigned long i = 0; i < faces.size(); i++) {
       shapes.push_back(pose_model(cimg, faces[i]));
     }
     printf("faces, detect time: %lu %f\n", faces.size(), float( clock () - begin_time ) / CLOCKS_PER_SEC);
-    win.clear_overlay();
-    win.set_image(cimg);
+    if (false) {
+      win.clear_overlay();
+      win.set_image(cimg);
+    }
     // win.add_overlay(render_face_detections(shapes));
 
+    std::vector<rectangle> face_boxes;
+    std::vector<rectangle> left_eye_boxes;
+    std::vector<rectangle> right_eye_boxes;
     std::vector<image_window::overlay_line> lines;
     const rgb_pixel color = rgb_pixel(0,0,255);
+
     for(unsigned long i = 0; i < shapes.size(); i++) {
       const full_object_detection& d = shapes[i];
 
+      rectangle left_eye_box = to_square(get_bounding_box(d, 36, 41));
+      rectangle right_eye_box = to_square(get_bounding_box(d, 42, 47));
 
-      rectangle left_eye_box = get_bounding_box(d, 37, 41);
+      face_boxes.push_back(to_square(faces[i]));
+      left_eye_boxes.push_back(left_eye_box);
+      right_eye_boxes.push_back(right_eye_box);
 
-      rectangle right_eye_box = get_bounding_box(d, 43, 47);
-
-      win.add_overlay(faces[i], color);
-      win.add_overlay(left_eye_box, color);
-      win.add_overlay(right_eye_box, color);
+      if (false) {
+        win.add_overlay(to_square(faces[i]), color);
+        win.add_overlay(left_eye_box, color);
+        win.add_overlay(right_eye_box, color);
+      }
     }
-    // win.add_overlay(lines);
 
-   // cv::imshow("frame", matPrevRGB);
-    // cv::waitKey(0);
+    long width = camera->GetWidth();
+    long height = camera->GetHeight();
+    cv::cuda::GpuMat cvRgb = cv::cuda::GpuMat(height, width, CV_32FC4, imgRGBA);
+    if(face_boxes.size() > 0) {
+      int numGazes = maxGazes;
 
-    // if( CUDA_FAILED(rgbaToGreyscaleCuda((uchar4*)imgRGBA, &imgGrayscale, camera->GetWidth(), camera->GetHeight())));
-    // {
-      // printf("CUDA convert to grayscale failed\n");
-      // return -1;
-    // }
+      rectangle face_box = face_boxes[0];
+      point center = dlib::center(face_box);
 
-		// classify image
-		const int img_class = net->Classify((float*)imgRGBA, camera->GetWidth(), camera->GetHeight(), &confidence);
+      cv::Rect crop(center.x(), center.y(), face_box.width(), face_box.height());
 
-		if( img_class >= 0 )
-		{
-			if( display != NULL )
-			{
-				char str[256];
-				sprintf(str, "TensorRT build %x | %s | %04.1f FPS", NV_GIE_VERSION, net->HasFP16() ? "FP16" : "FP32", display->GetFPS());
-				//sprintf(str, "TensorRT build %x | %s | %04.1f FPS | %05.2f%% %s", NV_GIE_VERSION, net->GetNetworkName(), display->GetFPS(), confidence * 100.0f, net->GetClassDesc(img_class));
-				display->SetTitle(str);
-			}
-		}
+      cv::cuda::GpuMat cropped = cv::cuda::GpuMat(cvRgb,
+          crop);
+
+      cv::cuda::GpuMat output;
+
+      // cv::cuda::remap(cropped, output, cv::Size(244, 244));
+
+      //
+
+       cudaResizeRGBA((float4*)cropped.data, width, height, (float4*)imgFace, 244, 244);
+              // face_box.left(), face_box.bottom(), face_box.width(), face_box.height()))
+      // if(CUDA_FAILED(cudaCropRGBA((float4*)imgRGBA, width, height, (float4*)imgFace,
+              // face_box.left(), face_box.top(), 244, 244 [>face_box.width(), face_box.height()<]))) {
+        // printf("cameraNet::cropFace failed");
+      // }
+
+
+      // classify image
+      if(false && net->Detect((float*)imgFace, (float*)imgLeftEye, (float*)imgRightEye, (float*)faceGrid,
+            gazesCPU)) {
+          printf("gaze detected");
+      }
+    }
+
+		// if( img_class >= 0 )
+		// {
+			// if( display != NULL )
+			// {
+				// char str[256];
+				// sprintf(str, "TensorRT build %x | %s | %04.1f FPS", NV_GIE_VERSION, net->HasFP16() ? "FP16" : "FP32", display->GetFPS());
+				// //sprintf(str, "TensorRT build %x | %s | %04.1f FPS | %05.2f%% %s", NV_GIE_VERSION, net->GetNetworkName(), display->GetFPS(), confidence * 100.0f, net->GetClassDesc(img_class));
+				// display->SetTitle(str);
+			// }
+		// }
 
 
     // int numFaceBoxes = faces.size();
@@ -300,14 +362,36 @@ int main( int argc, char** argv )
 				// map from CUDA to openGL using GL interop
 				void* tex_map = texture->MapCUDA();
 
-				if( tex_map != NULL )
-				{
-					cudaMemcpy(tex_map, imgRGBA, texture->GetSize(), cudaMemcpyDeviceToDevice);
-					texture->Unmap();
-				}
+        if( tex_map != NULL )
+        {
+          cudaMemcpy(tex_map, imgRGBA, texture->GetSize(), cudaMemcpyDeviceToDevice);
+          texture->Unmap();
+        }
 
-				// draw the texture
-				texture->Render(100,100);
+        texture->Render(100,100);
+
+        if(face_boxes.size() > 0) {
+           rectangle face_box = face_boxes[0];
+          // draw the texture
+
+          // rescale image pixel intensities of face for display
+          CUDA(cudaNormalizeRGBA((float4*)imgFace, make_float2(0.0f, 255.0f),
+                     (float4*)imgFace, make_float2(0.0f, 1.0f),
+                     face_box.width(), face_box.height()));
+
+
+          void* tex_map2 = faceTexture->MapCUDA();
+
+          if( tex_map2 != NULL )
+          {
+            cudaMemcpy(tex_map2, imgFace, faceTexture->GetSize(), cudaMemcpyDeviceToDevice);
+            faceTexture->Unmap();
+          }
+
+          // draw the texture
+          faceTexture->Render(500,500);
+
+        }
 			}
 
 			display->EndRender();
