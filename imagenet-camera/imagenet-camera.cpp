@@ -34,7 +34,7 @@
 #include "imageNet.h"
 
 
-#define DEFAULT_CAMERA -1	// -1 for onboard camera, or change to index of /dev/video V4L2 camera (>=0)	
+#define DEFAULT_CAMERA 0	// -1 for onboard camera, or change to index of /dev/video V4L2 camera (>=0)	
 		
 		
 		
@@ -52,7 +52,7 @@ void sig_handler(int signo)
 
 int main( int argc, char** argv )
 {
-	printf("imagenet-camera\n  args (%i):  ", argc);
+	printf("gazeCapture-camera\n  args (%i):  ", argc);
 
 	for( int i=0; i < argc; i++ )
 		printf("%i [%s]  ", i, argv[i]);
@@ -74,11 +74,11 @@ int main( int argc, char** argv )
 	
 	if( !camera )
 	{
-		printf("\nimagenet-camera:  failed to initialize video device\n");
+		printf("\ngazeCapture-camera:  failed to initialize video device\n");
 		return 0;
 	}
 	
-	printf("\nimagenet-camera:  successfully initialized video device\n");
+	printf("\ngazeCapture-camera:  successfully initialized video device\n");
 	printf("    width:  %u\n", camera->GetWidth());
 	printf("   height:  %u\n", camera->GetHeight());
 	printf("    depth:  %u (bpp)\n\n", camera->GetPixelDepth());
@@ -91,7 +91,7 @@ int main( int argc, char** argv )
 	
 	if( !net )
 	{
-		printf("imagenet-console:   failed to initialize imageNet\n");
+		printf("gazeCapture-console:   failed to initialize imageNet\n");
 		return 0;
 	}
 
@@ -103,14 +103,14 @@ int main( int argc, char** argv )
 	glTexture* texture = NULL;
 	
 	if( !display ) {
-		printf("\nimagenet-camera:  failed to create openGL display\n");
+		printf("\ngazeCapture-camera:  failed to create openGL display\n");
 	}
 	else
 	{
 		texture = glTexture::Create(camera->GetWidth(), camera->GetHeight(), GL_RGBA32F_ARB/*GL_RGBA8*/);
 
 		if( !texture )
-			printf("imagenet-camera:  failed to create openGL texture\n");
+			printf("gazeCapture-camera:  failed to create openGL texture\n");
 	}
 	
 	
@@ -125,11 +125,11 @@ int main( int argc, char** argv )
 	 */
 	if( !camera->Open() )
 	{
-		printf("\nimagenet-camera:  failed to open camera for streaming\n");
+		printf("\ngazeCapture-camera:  failed to open camera for streaming\n");
 		return 0;
 	}
 	
-	printf("\nimagenet-camera:  camera open for streaming\n");
+	printf("\ngazeCapture-camera:  camera open for streaming\n");
 	
 	
 	/*
@@ -144,22 +144,22 @@ int main( int argc, char** argv )
 		
 		// get the latest frame
 		if( !camera->Capture(&imgCPU, &imgCUDA, 1000) )
-			printf("\nimagenet-camera:  failed to capture frame\n");
+			printf("\ngazeCapture-camera:  failed to capture frame\n");
 		//else
-		//	printf("imagenet-camera:  recieved new frame  CPU=0x%p  GPU=0x%p\n", imgCPU, imgCUDA);
+		//	printf("gazeCapture-camera:  recieved new frame  CPU=0x%p  GPU=0x%p\n", imgCPU, imgCUDA);
 		
 		// convert from YUV to RGBA
 		void* imgRGBA = NULL;
 		
 		if( !camera->ConvertRGBA(imgCUDA, &imgRGBA) )
-			printf("imagenet-camera:  failed to convert from NV12 to RGBA\n");
+			printf("gazeCapture-camera:  failed to convert from NV12 to RGBA\n");
 
 		// classify image
 		const int img_class = net->Classify((float*)imgRGBA, camera->GetWidth(), camera->GetHeight(), &confidence);
 	
 		if( img_class >= 0 )
 		{
-			printf("imagenet-camera:  %2.5f%% class #%i (%s)\n", confidence * 100.0f, img_class, net->GetClassDesc(img_class));	
+			printf("gazeCapture-camera:  %2.5f%% class #%i (%s)\n", confidence * 100.0f, img_class, net->GetClassDesc(img_class));	
 
 			if( font != NULL )
 			{
@@ -210,7 +210,7 @@ int main( int argc, char** argv )
 		}
 	}
 	
-	printf("\nimagenet-camera:  un-initializing video device\n");
+	printf("\ngazeCapture-camera:  un-initializing video device\n");
 	
 	
 	/*
@@ -228,8 +228,8 @@ int main( int argc, char** argv )
 		display = NULL;
 	}
 	
-	printf("imagenet-camera:  video device has been un-initialized.\n");
-	printf("imagenet-camera:  this concludes the test of the video device.\n");
+	printf("gazeCapture-camera:  video device has been un-initialized.\n");
+	printf("gazeCapture-camera:  this concludes the test of the video device.\n");
 	return 0;
 }
 

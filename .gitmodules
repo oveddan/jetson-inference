@@ -1,0 +1,3 @@
+[submodule "libs/dlib"]
+	path = libs/dlib
+	url = https://github.com/oveddan/dlib.git

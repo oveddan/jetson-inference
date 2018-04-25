@@ -22,6 +22,12 @@
 
 #include "gstCamera.h"
 
+#include "opencv2/opencv.hpp"
+#include "dlib/opencv.h"
+#include "dlib/image_processing/frontal_face_detector.h"
+#include <dlib/image_processing/render_face_detections.h>
+#include <dlib/image_processing.h>
+
 #include "glDisplay.h"
 #include "glTexture.h"
 
@@ -30,12 +36,14 @@
 #include <unistd.h>
 
 #include "cudaNormalize.h"
+// #include "cudaGrayscale.h"
+#include "cudaOverlay.h"
 #include "cudaFont.h"
 #include "gazeNet.h"
 
-
 #define DEFAULT_CAMERA 0	// -1 for onboard camera, or change to index of /dev/video V4L2 camera (>=0)
 
+using namespace dlib;
 
 
 bool signal_recieved = false;
@@ -137,6 +145,14 @@ int main( int argc, char** argv )
 	 */
 	float confidence = 0.0f;
 
+  frontal_face_detector detector = get_frontal_face_detector();
+  shape_predictor pose_model;
+  deserialize("networks/shape_predictor_68_face_landmarks.dat") >> pose_model;
+
+  cv::namedWindow( "frame", CV_WINDOW_AUTOSIZE );
+
+  image_window win;
+
 	while( !signal_recieved )
 	{
 		void* imgCPU  = NULL;
@@ -145,14 +161,68 @@ int main( int argc, char** argv )
 		// get the latest frame
 		if( !camera->Capture(&imgCPU, &imgCUDA, 1000) )
 			printf("\ngazenet-camera:  failed to capture frame\n");
-		//else
-		//	printf("gazenet-camera:  recieved new frame  CPU=0x%p  GPU=0x%p\n", imgCPU, imgCUDA);
+    // else
+      // printf("gazenet-camera:  recieved new frame  CPU=0x%p  GPU=0x%p\n", imgCPU, imgCUDA);
 
 		// convert from YUV to RGBA
 		void* imgRGBA = NULL;
 
-		if( !camera->ConvertRGBA(imgCUDA, &imgRGBA) )
+		if( !camera->ConvertRGBA(imgCUDA, &imgRGBA, true) )
 			printf("gazenet-camera:  failed to convert from NV12 to RGBA\n");
+
+    clock_t begin_time = clock();
+    cv::Mat matPrevRGB = cv::Mat(camera->GetHeight(), camera->GetWidth(), CV_8UC3, (char*)imgCPU, cv::Mat::AUTO_STEP);
+    cv::Mat res;
+    cv::resize(matPrevRGB, res, cv::Size(), 0.5, .5);
+    std::time_t e = std::time(0);
+    printf("New size, time: %f %f %f\n", float( clock () - begin_time ) / CLOCKS_PER_SEC, camera->GetHeight()*.5, camera->GetWidth()*.5);
+
+    // cv::Mat matPrevRGB;
+    // cv::cvtColor(matPrev, matPrevRGB, CV_RGB2BGR);
+
+    // // cv::Mat mat2;
+    // cv::cvtColor(matRGBA, mat2, CV_RGB2BGR);
+
+    // void* imgGrayscale = NULL;
+    begin_time = clock();
+
+    cv_image<rgb_pixel> cimg(res);
+    std::vector<rectangle> faces = detector(cimg);
+    std::vector<full_object_detection> shapes;
+     // Display it all on the screen
+    for(unsigned long i = 0; i < faces.size(); i++) {
+      shapes.push_back(pose_model(cimg, faces[i]));
+    }
+    printf("faces, detect time: %lu %f\n", faces.size(), float( clock () - begin_time ) / CLOCKS_PER_SEC);
+    win.clear_overlay();
+    win.set_image(cimg);
+    win.add_overlay(render_face_detections(shapes));
+
+    std::vector<image_window::overlay_line> lines;
+    const rgb_pixel color = rgb_pixel(0,0,255);
+    for(unsigned long i = 0; i < shapes.size(); i++) {
+      const full_object_detection& d = shapes[i];
+
+      // left eye
+      for(unsigned long i = 37; i <= 41; i++) {
+        lines.push_back(image_window::overlay_line(d.part(i), d.part(i-1), color));
+      }
+
+      // right eye
+      for(unsigned long i = 43; i <= 47; i++) {
+        lines.push_back(image_window::overlay_line(d.part(i), d.part(i-1), color));
+      }
+    }
+    win.add_overlay(lines);
+
+   // cv::imshow("frame", matPrevRGB);
+    // cv::waitKey(0);
+
+    // if( CUDA_FAILED(rgbaToGreyscaleCuda((uchar4*)imgRGBA, &imgGrayscale, camera->GetWidth(), camera->GetHeight())));
+    // {
+      // printf("CUDA convert to grayscale failed\n");
+      // return -1;
+    // }
 
 		// classify image
 		const int img_class = net->Classify((float*)imgRGBA, camera->GetWidth(), camera->GetHeight(), &confidence);
@@ -162,11 +232,30 @@ int main( int argc, char** argv )
 			if( display != NULL )
 			{
 				char str[256];
-				sprintf(str, "TensorRT build %x | %s | %s | %04.1f FPS", NV_GIE_VERSION, net->HasFP16() ? "FP16" : "FP32", display->GetFPS());
+				sprintf(str, "TensorRT build %x | %s | %04.1f FPS", NV_GIE_VERSION, net->HasFP16() ? "FP16" : "FP32", display->GetFPS());
 				//sprintf(str, "TensorRT build %x | %s | %04.1f FPS | %05.2f%% %s", NV_GIE_VERSION, net->GetNetworkName(), display->GetFPS(), confidence * 100.0f, net->GetClassDesc(img_class));
 				display->SetTitle(str);
 			}
 		}
+
+
+    // int numFaceBoxes = faces.size();
+    // for( int n=0; n < numFaceBoxes; n++ )
+    // {
+      // // rectangle face = faces[n];
+      // // float4 bb((float)face.left(), (float)face.bottom(), (float)face.right(), (float)face.top());
+      // // printf("bounding box %i   (%f, %f)  (%f, %f)  w=%f  h=%f\n", n, bb.x, bb.y, bb.z, bb.w, bb.z - bb.x, bb.w - bb.y);
+
+      // if( CUDA_FAILED(cudaRectOutlineOverlay((float*)imgRGBA, (float*)imgRGBA, camera->GetWidth(), camera->GetHeight(),
+                                // (float)face.left(), (float)face.bottom(), (float)face.right(), (float)face.top()) )) {
+        // printf("detectnet-console:  failed to draw boxes\n");
+
+        // // lastClass = nc;
+        // // lastStart = n;
+
+        // CUDA(cudaDeviceSynchronize());
+      // }
+    // }
 
 
 		// update display

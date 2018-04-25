@@ -21,8 +21,8 @@
  */
  
 #include "cudaUtility.h"
-
-
+#include <stdio.h>
+ 
 
 // gpuPreImageNet
 __global__ void gpuPreImageNet( float2 scale, float4* input, int iWidth, float* output, int oWidth, int oHeight )
@@ -114,5 +114,3 @@ cudaError_t cudaPreImageNetMean( float4* input, size_t inputWidth, size_t inputH
 
 	return CUDA(cudaGetLastError());
 }
-
-

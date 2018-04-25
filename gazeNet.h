@@ -20,24 +20,11 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-#ifndef __IMAGE_NET_H__
-#define __IMAGE_NET_H__
+#ifndef __GAZE_NET_H__
+#define __GAZE_NET_H__
 
 
 #include "tensorNet.h"
-
-
-/**
- * Name of default input blob for gazeNet model.
- * @ingroup deepVision
- */
-#define IMAGENET_DEFAULT_INPUT   "data"
-
-/**
- * Name of default output confidence values for gazeNet model.
- * @ingroup deepVision
- */
-#define IMAGENET_DEFAULT_OUTPUT  "prob"
 
 
 /**

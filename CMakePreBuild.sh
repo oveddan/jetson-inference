@@ -36,6 +36,16 @@ wget --no-check-certificate 'https://github.com/CSAILVision/GazeCapture/raw/mast
 wget --no-check-certificate 'https://github.com/CSAILVision/GazeCapture/raw/master/models/mean_images/mean_right_224.mat'
 mv *.mat ../data/networks/gaze-capture/
 
+
+echo "Downloading shape_predictor_68_face_landmarks.dat"
+curl -L -o ../data/networks/shape_predictor_68_face_landmarks.dat.bz2 --progress-bar 
+https://sourceforge.net/projects/dclib/files/dlib/v18.10/shape_predictor_68_face_landmarks.dat.bz2
+
+echo "Extracting shape_predictor_68_face_landmarks.dat"
+bzip2 -d ../data/networks/shape_predictor_68_face_landmarks.dat.bz2
+
+echo "Done"
+
 # uncomment to download Alexnet (220MB)
 #wget http://dl.caffe.berkeleyvision.org/bvlc_alexnet.caffemodel
 #wget --no-check-certificate 'https://nvidia.box.com/shared/static/5j264j7mky11q8emy4q14w3r8hl5v6zh.caffemodel' -O bvlc_alexnet.caffemodel

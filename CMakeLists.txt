@@ -1,5 +1,5 @@
 
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.1)
 project(jetson-inference)
 
 # setup tensorRT flags
@@ -18,6 +18,7 @@ if( ${BUILD_DEPS} )
 	set(BUILD_DEPS "NO" CACHE BOOL "If YES, will install dependencies into sandbox.  Automatically reset to NO after dependencies are installed." FORCE)
 	message("Finished installing dependencies")
 endif()
+
 
 
 # Qt is used to load images (installed by ubuntu-desktop)
@@ -52,8 +53,6 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_OUTPUT_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_OUTPUT_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_OUTPUT_DIR}/lib)
 
-
-# build C/C++ interface
 include_directories(${PROJECT_INCLUDE_DIR} ${GIE_PATH}/include)
 include_directories(/usr/include/gstreamer-1.0 /usr/lib/aarch64-linux-gnu/gstreamer-1.0/include /usr/include/glib-2.0 /usr/include/libxml2 /usr/lib/aarch64-linux-gnu/glib-2.0/include/)
 
@@ -62,7 +61,6 @@ file(GLOB inferenceIncludes *.h util/*.h util/camera/*.h util/cuda/*.h util/disp
 
 cuda_add_library(jetson-inference SHARED ${inferenceSources})
 target_link_libraries(jetson-inference nvcaffe_parser nvinfer Qt4::QtGui GL GLEW gstreamer-1.0 gstapp-1.0)		# gstreamer-0.10 gstbase-0.10 gstapp-0.10 
-
 
 # transfer all headers to the include directory
 foreach(include ${inferenceIncludes})
@@ -87,7 +85,6 @@ endforeach()
 
 # copy tools
 file(COPY "tools/segnet-batch.sh" DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
-
 
 # build samples & utilities
 #add_subdirectory(imagenet-console)
