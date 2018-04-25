@@ -26,6 +26,8 @@
 
 #include "tensorNet.h"
 
+const int GAZE_IMAGE_DIM = 224;
+const int GAZE_FACE_GRID_DIM = 25;
 
 /**
  * Image recognition with GoogleNet/Alexnet or custom models, using TensorRT.
@@ -61,21 +63,20 @@ public:
 	 */
 	virtual ~gazeNet();
 
-	/**
-	 * Determine the maximum likelihood image class.
-	 * @param rgba float4 input image in CUDA device memory.
-	 * @param width width of the input image in pixels.
-	 * @param height height of the input image in pixels.
-	 * @param confidence optional pointer to float filled with confidence value.
-	 * @returns Index of the maximum class, or -1 on error.
-	 */
-	int Classify( float* rgba, uint32_t width, uint32_t height, float* confidence=NULL );
+  inline uint32_t GetMaxGazes() {
+    return maxBatchSize;
+  };
+
+  bool Detect( float* faceImage, float* leftEyeImage, float* rightEyeImage,
+      float* faceGrid, float* gaze);
 
 protected:
-	gazeNet();
+  gazeNet();
 
 	bool init(const char* prototxt_path, const char* model_path, const char* mean_face_binary,
-   const char* mean_left_binary, const char* mean_right_binary, uint32_t maxBatchSize );
+  const char* mean_left_binary, const char* mean_right_binary, uint32_t maxBatchSize );
+
+  uint32_t maxBatchSize;
 };
 
 

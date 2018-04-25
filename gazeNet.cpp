@@ -32,6 +32,12 @@ const char* DEFAULT_MEAN_FACE = "networks/gaze-capture/mean_face_224.mat";
 const char* DEFAULT_MEAN_LEFT = "networks/gaze-capture/mean_left_224.mat";
 const char* DEFAULT_MEAN_RIGHT = "networks/gaze-capture/mean_right_224.mat";
 
+#define INPUT_FACE 0
+#define INPUT_LEFT_EYE 1
+#define INPUT_RIGHT_EYE 2
+#define INPUT_FACE_GRID 3
+#define OUTPUT_GAZE 0
+
 // constructor
 gazeNet::gazeNet() : tensorNet()
 {
@@ -49,6 +55,7 @@ gazeNet* gazeNet::Create( const char* prototxt_path, const char* model_path, con
    const char* mean_left_binary, const char* mean_right_binary, uint32_t maxBatchSize )
 {
   gazeNet* net = new gazeNet();
+  net->maxBatchSize = maxBatchSize;
 
   if( !net )
     return NULL;
@@ -131,40 +138,69 @@ bool gazeNet::init(const char* prototxt_path, const char* model_path, const char
 // from gazeNet.cu
 cudaError_t cudaPreImageNetMean( float4* input, size_t inputWidth, size_t inputHeight, float* output, size_t outputWidth, size_t outputHeight, const float3& mean_value );
 
+bool gazeNet::Detect( float* faceImage, float* leftEyeImage, float* rightEyeImage,
+      float* faceGrid, float* gaze) {
 
-// Classify
-int gazeNet::Classify( float* rgba, uint32_t width, uint32_t height, float* confidence )
-{
-  if( !rgba || width == 0 || height == 0 )
-  {
-    printf("gazeNet::Classify( 0x%p, %u, %u ) -> invalid parameters\n", rgba, width, height);
-    return -1;
+
+  // todo: COPY TO CUDA input
+
+  void* inferenceBuffers[] = {
+    mInputs[INPUT_FACE].CUDA,
+    mInputs[INPUT_LEFT_EYE].CUDA,
+    mInputs[INPUT_RIGHT_EYE].CUDA,
+    mInputs[INPUT_FACE_GRID].CUDA,
+    mOutputs[OUTPUT_GAZE].CUDA
+  };
+
+  if (!mContext->execute(1, inferenceBuffers)) {
+    printf(LOG_GIE "gazeCapture::Detect() -- failed to execute tensorRT context\n");
+
+    return false;
   }
 
-
-  for(int i = 0; i < mInputs.size(); i++) {
-    // downsample and convert to band-sequential BGR
-    if( CUDA_FAILED(cudaPreImageNetMean((float4*)rgba, width, height, mInputs[i].CUDA, mInputs[i].width, mInputs[i].height,
-                   make_float3(104.0069879317889f, 116.66876761696767f, 122.6789143406786f))) )
-    {
-      printf("gazeNet::Classify() -- cudaPreImageNetMean failed\n");
-      return -1;
-    }
-  }
-
-
-  // process with GIE
-  void* inferenceBuffers[] = { mInputs[0].CUDA, mInputs[1].CUDA, mInputs[2].CUDA, mInputs[3].CUDA, mOutputs[0].CUDA };
-
-  mContext->execute(1, inferenceBuffers);
-
-  //CUDA(cudaDeviceSynchronize());
   PROFILER_REPORT();
 
+  gaze = mOutputs[OUTPUT_GAZE].CPU;
 
-  // determine the maximum class
-  // todo: extract outputs
-  //printf("\nmaximum class:  #%i  (%f) (%s)\n", classIndex, classMax, mClassDesc[classIndex].c_str());
-  return 0;
+  printf("predicted gaze %f, %f", gaze[0], gaze[1]);
+
+  return true;
 }
+
+
+// Classify
+// int gazeNet::Classify( float* rgba, uint32_t width, uint32_t height, float* confidence )
+// {
+  // if( !rgba || width == 0 || height == 0 )
+  // {
+    // printf("gazeNet::Classify( 0x%p, %u, %u ) -> invalid parameters\n", rgba, width, height);
+    // return -1;
+  // }
+
+
+  // for(int i = 0; i < mInputs.size(); i++) {
+    // // downsample and convert to band-sequential BGR
+    // if( CUDA_FAILED(cudaPreImageNetMean((float4*)rgba, width, height, mInputs[i].CUDA, mInputs[i].width, mInputs[i].height,
+                   // make_float3(104.0069879317889f, 116.66876761696767f, 122.6789143406786f))) )
+    // {
+      // printf("gazeNet::Classify() -- cudaPreImageNetMean failed\n");
+      // return -1;
+    // }
+  // }
+
+
+  // // process with GIE
+  // void* inferenceBuffers[] = { mInputs[0].CUDA, mInputs[1].CUDA, mInputs[2].CUDA, mInputs[3].CUDA, mOutputs[0].CUDA };
+
+  // mContext->execute(1, inferenceBuffers);
+
+  // //CUDA(cudaDeviceSynchronize());
+  // PROFILER_REPORT();
+
+
+  // // determine the maximum class
+  // // todo: extract outputs
+  // //printf("\nmaximum class:  #%i  (%f) (%s)\n", classIndex, classMax, mClassDesc[classIndex].c_str());
+  // return 0;
+// }
 
