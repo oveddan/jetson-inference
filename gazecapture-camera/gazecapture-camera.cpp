@@ -142,6 +142,8 @@ int main( int argc, char** argv )
 
   float* gazesCPU    = NULL;
 	float* gazesCUDA   = NULL;
+  void* imgFaceCropped = NULL;
+  void* imgFaceCroppedCPU = NULL;
   void* imgFace = NULL;
   void* imgFaceCPU = NULL;
   float* imgLeftEye = NULL;
@@ -153,6 +155,12 @@ int main( int argc, char** argv )
     printf("gazecapture-camera:  failed to alloc output memory\n");
     return 0;
   }
+ if( !cudaAllocMapped((void**)&imgFaceCroppedCPU, (void**)&imgFaceCropped, 244 * 244 * sizeof(float4)) )
+  {
+    printf("gazecapture-camera:  failed to alloc output memory\n");
+    return 0;
+  }
+
 
 	// if( !cudaAllocMapped((void**)&gazesCPU, (void**)&gazesCUDA, maxGazes * sizeof(float2)) )
 	// {
@@ -282,25 +290,39 @@ int main( int argc, char** argv )
 
     long width = camera->GetWidth();
     long height = camera->GetHeight();
-    cv::cuda::GpuMat cvRgb = cv::cuda::GpuMat(height, width, CV_32FC4, imgRGBA);
+    // cv::cuda::GpuMat faceGpuMat;
     if(face_boxes.size() > 0) {
       int numGazes = maxGazes;
+
 
       rectangle face_box = face_boxes[0];
       point center = dlib::center(face_box);
 
-      cv::Rect crop(center.x(), center.y(), face_box.width(), face_box.height());
+      // printf("%lu %lu %lu %lu", center.x(), center.y() , face_box.width(), face_box.height());
+      // cv::Rect crop(center.x() / detectionScale, center.y()/ detectionScale, face_box.width()/ detectionScale, face_box.height()/ detectionScale);
 
-      cv::cuda::GpuMat cropped = cv::cuda::GpuMat(cvRgb,
-          crop);
+      // printf("Cropping");
+      // cv::Mat cropped(matPrevRGB, crop);
 
-      cv::cuda::GpuMat output;
+      // cv::Mat resized(cv::Size(244, 244), CV_8UC3, imgFaceCPU);
+
+      // printf("resizing");
+
+      // cv::resize(cropped, resized, cv::Size(244, 244));
+      // cudaAllocMapped(resized.data, imgFace, 244*244*sizeof(float3));
+      // cv::cuda::GpuMat cropped = cv::cuda::GpuMat(cvRgb,
+          // crop);
+
+      // cv::cuda::GpuMat output;
 
       // cv::cuda::remap(cropped, output, cv::Size(244, 244));
 
       //
 
-       cudaResizeRGBA((float4*)cropped.data, width, height, (float4*)imgFace, 244, 244);
+       cudaCropRGBA((float4*)imgRGBA, width, height, (float4*)imgFaceCropped,
+              face_box.left() / detectionScale, face_box.top() / detectionScale, face_box.width() / detectionScale, face_box.height() / detectionScale);
+
+       cudaResizeRGBA((float4*)imgFaceCropped, face_box.width() / detectionScale, face_box.height() / detectionScale, (float4*)imgFace, 244, 244);
               // face_box.left(), face_box.bottom(), face_box.width(), face_box.height()))
       // if(CUDA_FAILED(cudaCropRGBA((float4*)imgRGBA, width, height, (float4*)imgFace,
               // face_box.left(), face_box.top(), 244, 244 [>face_box.width(), face_box.height()<]))) {
@@ -369,30 +391,28 @@ int main( int argc, char** argv )
         }
 
         texture->Render(100,100);
+      }
 
-        if(face_boxes.size() > 0) {
-           rectangle face_box = face_boxes[0];
-          // draw the texture
+      if(faceTexture != NULL && face_boxes.size() > 0) {
 
-          // rescale image pixel intensities of face for display
-          CUDA(cudaNormalizeRGBA((float4*)imgFace, make_float2(0.0f, 255.0f),
-                     (float4*)imgFace, make_float2(0.0f, 1.0f),
-                     face_box.width(), face_box.height()));
+        // rescale image pixel intensities of face for display
+        CUDA(cudaNormalizeRGBA((float4*)imgFace, make_float2(0.0f, 255.0f),
+                   (float4*)imgFace, make_float2(0.0f, 1.0f),
+                   244, 244));
 
 
-          void* tex_map2 = faceTexture->MapCUDA();
+        void* tex_map2 = faceTexture->MapCUDA();
 
-          if( tex_map2 != NULL )
-          {
-            cudaMemcpy(tex_map2, imgFace, faceTexture->GetSize(), cudaMemcpyDeviceToDevice);
-            faceTexture->Unmap();
-          }
-
-          // draw the texture
-          faceTexture->Render(500,500);
-
+        if( tex_map2 != NULL )
+        {
+          cudaMemcpy(tex_map2, imgFace, faceTexture->GetSize(), cudaMemcpyDeviceToDevice);
+          faceTexture->Unmap();
         }
-			}
+
+        // draw the texture
+        faceTexture->Render(500,500);
+
+      }
 
 			display->EndRender();
 		}

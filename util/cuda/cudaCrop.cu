@@ -32,8 +32,8 @@ __global__ void gpuCrop( int left, int top, T* input, int iWidth, T* output, int
 	if( x >= oWidth || y >= oHeight )
 		return;
 
-	const int dx = ((float)left);
-	const int dy = ((float)top);
+  const int dx = left + x;
+	const int dy = top + y;
 
 	const T px = input[ dy * iWidth + dx ];
 
