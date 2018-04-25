@@ -78,6 +78,17 @@ rectangle to_square(const rectangle& rect) {
   );
 }
 
+void cropAndResize(void* imgRGBA, long imageWidth, long imageHeight, void* imgCropped,
+    rectangle cropBox, float cropBoxScale, void* imgScaled, long resizeWidth, long resizeHeight) {
+
+  cudaCropRGBA((float4*)imgRGBA, imageWidth, imageHeight,
+    (float4*)imgCropped,
+    cropBox.left() / cropBoxScale, cropBox.top() / cropBoxScale, cropBox.width() / cropBoxScale, cropBox.height() / cropBoxScale);
+
+  cudaResizeRGBA((float4*)imgCropped, cropBox.width() / cropBoxScale,
+    cropBox.height() / cropBoxScale, (float4*)imgScaled, resizeWidth, resizeHeight);
+}
+
 bool signal_recieved = false;
 
 void sig_handler(int signo)
@@ -110,7 +121,7 @@ int main( int argc, char** argv )
 	/*
 	 * create the camera device
 	 */
-	gstCamera* camera = gstCamera::Create(DEFAULT_CAMERA);
+	gstCamera* camera = gstCamera::Create(1920, 1080, DEFAULT_CAMERA);
 
 	if( !camera )
 	{
@@ -142,26 +153,44 @@ int main( int argc, char** argv )
 
   float* gazesCPU    = NULL;
 	float* gazesCUDA   = NULL;
-  void* imgFaceCropped = NULL;
-  void* imgFaceCroppedCPU = NULL;
+  void* imgCropped = NULL;
   void* imgFace = NULL;
-  void* imgFaceCPU = NULL;
-  float* imgLeftEye = NULL;
-  float* imgRightEye = NULL;
+  void* imgLeftEyeCropped = NULL;
+  void* imgLeftEye = NULL;
+  void* imgRightEyeCropped = NULL;
+  void* imgRightEye = NULL;
   float* faceGrid = NULL;
 
- if( !cudaAllocMapped((void**)&imgFaceCPU, (void**)&imgFace, 244 * 244 * sizeof(float4)) )
+  long cameraWidth = camera->GetWidth();
+  long cameraHeight = camera->GetHeight();
+  long cropImageSize = cameraWidth * cameraHeight * sizeof(float4);
+  long resizeImageSize = 244 * 244 * sizeof(float4);
+
+  if(CUDA_FAILED(cudaMalloc((void**)&imgCropped, cropImageSize)))
   {
     printf("gazecapture-camera:  failed to alloc output memory\n");
     return 0;
   }
- if( !cudaAllocMapped((void**)&imgFaceCroppedCPU, (void**)&imgFaceCropped, 244 * 244 * sizeof(float4)) )
+  if(CUDA_FAILED(cudaMalloc((void**)&imgFace, resizeImageSize)))
+  {
+    printf("gazecapture-camera:  failed to alloc output memory\n");
+    return 0;
+  }
+  if(CUDA_FAILED(cudaMalloc((void**)&imgLeftEye, resizeImageSize)))
+  {
+    printf("gazecapture-camera:  failed to alloc output memory\n");
+    return 0;
+  }
+  if(CUDA_FAILED(cudaMalloc((void**)&imgRightEye, resizeImageSize)))
   {
     printf("gazecapture-camera:  failed to alloc output memory\n");
     return 0;
   }
 
 
+  // if (!allocateInputImage(camera->GetWidth(), camera->GetHeight(),
+    // imgFace, imgFaceCropped))
+    // return 0;
 	// if( !cudaAllocMapped((void**)&gazesCPU, (void**)&gazesCUDA, maxGazes * sizeof(float2)) )
 	// {
 		// printf("gazecapture-camera:  failed to alloc output memory\n");
@@ -224,7 +253,7 @@ int main( int argc, char** argv )
 
   image_window win;
 
-  float detectionScale = 0.5;
+  float detectionScale = 0.25;
 
 	while( !signal_recieved )
 	{
@@ -294,40 +323,14 @@ int main( int argc, char** argv )
     if(face_boxes.size() > 0) {
       int numGazes = maxGazes;
 
+      cropAndResize(imgRGBA, width, height, imgCropped,
+              face_boxes[0], detectionScale, imgFace, 244, 244);
 
-      rectangle face_box = face_boxes[0];
-      point center = dlib::center(face_box);
+      cropAndResize(imgRGBA, width, height, imgCropped,
+              left_eye_boxes[0], detectionScale, imgLeftEye, 244, 244);
+      cropAndResize(imgRGBA, width, height, imgCropped,
+              right_eye_boxes[0], detectionScale, imgRightEye, 244, 244);
 
-      // printf("%lu %lu %lu %lu", center.x(), center.y() , face_box.width(), face_box.height());
-      // cv::Rect crop(center.x() / detectionScale, center.y()/ detectionScale, face_box.width()/ detectionScale, face_box.height()/ detectionScale);
-
-      // printf("Cropping");
-      // cv::Mat cropped(matPrevRGB, crop);
-
-      // cv::Mat resized(cv::Size(244, 244), CV_8UC3, imgFaceCPU);
-
-      // printf("resizing");
-
-      // cv::resize(cropped, resized, cv::Size(244, 244));
-      // cudaAllocMapped(resized.data, imgFace, 244*244*sizeof(float3));
-      // cv::cuda::GpuMat cropped = cv::cuda::GpuMat(cvRgb,
-          // crop);
-
-      // cv::cuda::GpuMat output;
-
-      // cv::cuda::remap(cropped, output, cv::Size(244, 244));
-
-      //
-
-       cudaCropRGBA((float4*)imgRGBA, width, height, (float4*)imgFaceCropped,
-              face_box.left() / detectionScale, face_box.top() / detectionScale, face_box.width() / detectionScale, face_box.height() / detectionScale);
-
-       cudaResizeRGBA((float4*)imgFaceCropped, face_box.width() / detectionScale, face_box.height() / detectionScale, (float4*)imgFace, 244, 244);
-              // face_box.left(), face_box.bottom(), face_box.width(), face_box.height()))
-      // if(CUDA_FAILED(cudaCropRGBA((float4*)imgRGBA, width, height, (float4*)imgFace,
-              // face_box.left(), face_box.top(), 244, 244 [>face_box.width(), face_box.height()<]))) {
-        // printf("cameraNet::cropFace failed");
-      // }
 
 
       // classify image
@@ -411,6 +414,38 @@ int main( int argc, char** argv )
 
         // draw the texture
         faceTexture->Render(500,500);
+
+        CUDA(cudaNormalizeRGBA((float4*)imgLeftEye, make_float2(0.0f, 255.0f),
+                   (float4*)imgLeftEye, make_float2(0.0f, 1.0f),
+                   244, 244));
+
+
+        tex_map2 = faceTexture->MapCUDA();
+
+        if( tex_map2 != NULL )
+        {
+          cudaMemcpy(tex_map2, imgLeftEye, faceTexture->GetSize(), cudaMemcpyDeviceToDevice);
+          faceTexture->Unmap();
+        }
+
+        // draw the texture
+        faceTexture->Render(100,100);
+
+        CUDA(cudaNormalizeRGBA((float4*)imgRightEye, make_float2(0.0f, 255.0f),
+                   (float4*)imgRightEye, make_float2(0.0f, 1.0f),
+                   244, 244));
+
+
+        tex_map2 = faceTexture->MapCUDA();
+
+        if( tex_map2 != NULL )
+        {
+          cudaMemcpy(tex_map2, imgRightEye, faceTexture->GetSize(), cudaMemcpyDeviceToDevice);
+          faceTexture->Unmap();
+        }
+
+        // draw the texture
+        faceTexture->Render(800,100);
 
       }
 
