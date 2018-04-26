@@ -22,10 +22,6 @@
 
 #include "gstCamera.h"
 
-#include "opencv2/opencv.hpp"
-#include "dlib/opencv.h"
-#include "dlib/image_processing/frontal_face_detector.h"
-#include <dlib/image_processing/render_face_detections.h>
 #include <dlib/image_processing.h>
 
 #include "glDisplay.h"
@@ -42,54 +38,14 @@
 #include "cudaCrop.h"
 #include "cudaResize.h"
 #include "cudaFont.h"
+#include "featureExtractor.h"
+#include "gazecapture-util.h"
 #include "gazeNet.h"
 
 #define DEFAULT_CAMERA 0	// -1 for onboard camera, or change to index of /dev/video V4L2 camera (>=0)
 
-using namespace dlib;
-
-rectangle get_bounding_box(const full_object_detection& d, unsigned long first_line, unsigned long last_line) {
-  long left = 5000;
-  long top = -5000;
-  long right = -5000;
-  long bottom = 5000;
-
-  point pnt;
-  for(unsigned long i = first_line; i <= last_line; i++) {
-    pnt = d.part(i);
-
-    left = std::min(left, pnt.x());
-    right = std::max(right, pnt.x());
-    top = std::max(top, pnt.y());
-    bottom = std::min(bottom, pnt.y());
-  }
-  return rectangle(left, top, right, bottom);
-};
-
-rectangle to_square(const rectangle& rect) {
-  point center = dlib::center(rect);
-
-  long width = rect.right() - rect.left();
-  long height = rect.top() - rect.bottom();
-  long size = std::max(width, height);
-
-  return dlib::centered_rect(
-    center.x(), center.y(), size, size
-  );
-}
-
-void cropAndResize(void* imgRGBA, long imageWidth, long imageHeight, void* imgCropped,
-    rectangle cropBox, float cropBoxScale, void* imgScaled, long resizeWidth, long resizeHeight) {
-
-  cudaCropRGBA((float4*)imgRGBA, imageWidth, imageHeight,
-    (float4*)imgCropped,
-    cropBox.left() / cropBoxScale, cropBox.top() / cropBoxScale, cropBox.width() / cropBoxScale, cropBox.height() / cropBoxScale);
-
-  cudaResizeRGBA((float4*)imgCropped, cropBox.width() / cropBoxScale,
-    cropBox.height() / cropBoxScale, (float4*)imgScaled, resizeWidth, resizeHeight);
-}
-
 bool signal_recieved = false;
+using namespace dlib;
 
 void sig_handler(int signo)
 {
@@ -187,17 +143,7 @@ int main( int argc, char** argv )
     return 0;
   }
 
-
-  // if (!allocateInputImage(camera->GetWidth(), camera->GetHeight(),
-    // imgFace, imgFaceCropped))
-    // return 0;
-	// if( !cudaAllocMapped((void**)&gazesCPU, (void**)&gazesCUDA, maxGazes * sizeof(float2)) )
-	// {
-		// printf("gazecapture-camera:  failed to alloc output memory\n");
-		// return 0;
-	// }
-
-	/*
+  /*
 	 * create openGL window
 	 */
 	glDisplay* display = glDisplay::Create();
@@ -245,15 +191,11 @@ int main( int argc, char** argv )
 	 */
 	float confidence = 0.0f;
 
-  frontal_face_detector detector = get_frontal_face_detector();
-  shape_predictor pose_model;
-  deserialize("networks/shape_predictor_68_face_landmarks.dat") >> pose_model;
+  std::vector<rectangle> face_boxes;
+  std::vector<rectangle> left_eye_boxes;
+  std::vector<rectangle> right_eye_boxes;
 
-  // cv::namedWindow( "frame", CV_WINDOW_AUTOSIZE );
-
-  image_window win;
-
-  float detectionScale = 0.25;
+  FeatureExtractor featureExtractor;
 
 	while( !signal_recieved )
 	{
@@ -272,54 +214,15 @@ int main( int argc, char** argv )
 		if( !camera->ConvertRGBA(imgCUDA, &imgRGBA, true) )
 			printf("gazenet-camera:  failed to convert from NV12 to RGBA\n");
 
-    clock_t begin_time = clock();
-    cv::Mat matPrevRGB = cv::Mat(camera->GetHeight(), camera->GetWidth(), CV_8UC3, (char*)imgCPU, cv::Mat::AUTO_STEP);
-    cv::Mat res;
-    cv::resize(matPrevRGB, res, cv::Size(), detectionScale, detectionScale);
-    std::time_t e = std::time(0);
-    printf("New size, time: %f %f %f\n", float( clock () - begin_time ) / CLOCKS_PER_SEC, camera->GetHeight()*.5, camera->GetWidth()*.5);
-
-    begin_time = clock();
-
-    cv_image<rgb_pixel> cimg(res);
-    std::vector<rectangle> faces = detector(cimg);
-    std::vector<full_object_detection> shapes;
-    for(unsigned long i = 0; i < faces.size(); i++) {
-      shapes.push_back(pose_model(cimg, faces[i]));
-    }
-    printf("faces, detect time: %lu %f\n", faces.size(), float( clock () - begin_time ) / CLOCKS_PER_SEC);
-    if (false) {
-      win.clear_overlay();
-      win.set_image(cimg);
-    }
-    // win.add_overlay(render_face_detections(shapes));
-
-    std::vector<rectangle> face_boxes;
-    std::vector<rectangle> left_eye_boxes;
-    std::vector<rectangle> right_eye_boxes;
-    std::vector<image_window::overlay_line> lines;
-    const rgb_pixel color = rgb_pixel(0,0,255);
-
-    for(unsigned long i = 0; i < shapes.size(); i++) {
-      const full_object_detection& d = shapes[i];
-
-      rectangle left_eye_box = to_square(get_bounding_box(d, 36, 41));
-      rectangle right_eye_box = to_square(get_bounding_box(d, 42, 47));
-
-      face_boxes.push_back(to_square(faces[i]));
-      left_eye_boxes.push_back(left_eye_box);
-      right_eye_boxes.push_back(right_eye_box);
-
-      if (false) {
-        win.add_overlay(to_square(faces[i]), color);
-        win.add_overlay(left_eye_box, color);
-        win.add_overlay(right_eye_box, color);
-      }
-    }
-
     long width = camera->GetWidth();
     long height = camera->GetHeight();
-    // cv::cuda::GpuMat faceGpuMat;
+
+    face_boxes.clear();
+    left_eye_boxes.clear();
+    right_eye_boxes.clear();
+    featureExtractor.extract(height, width, imgCPU,
+        face_boxes, left_eye_boxes, right_eye_boxes);
+
     if(face_boxes.size() > 0) {
       int numGazes = maxGazes;
 
