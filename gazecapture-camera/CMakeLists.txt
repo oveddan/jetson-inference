@@ -1,6 +1,7 @@
 
 file(GLOB gazeCaptureCameraSources *.cpp)
 file(GLOB gazeCaptureCameraIncludes *.h )
+file(GLOB gazeCaptureCameraIncludes *.cu )
 
 find_package(OpenCV REQUIRED)
 

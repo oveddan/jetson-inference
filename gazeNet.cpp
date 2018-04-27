@@ -136,13 +136,28 @@ bool gazeNet::init(const char* prototxt_path, const char* model_path, const char
 
 
 // from gazeNet.cu
-cudaError_t cudaPreImageNetMean( float4* input, size_t inputWidth, size_t inputHeight, float* output, size_t outputWidth, size_t outputHeight, const float3& mean_value );
+cudaError_t cudaPreImageNet( float4* input, size_t inputWidth, size_t inputHeight, float* output, size_t outputWidth, size_t outputHeight);
 
 bool gazeNet::Detect( float* faceImage, float* leftEyeImage, float* rightEyeImage,
       float* faceGrid, float* gaze) {
 
 
-  // todo: COPY TO CUDA input
+  if(CUDA_FAILED(cudaPreImageNet((float4*)faceImage, 244, 244, mInputs[INPUT_FACE].CUDA, 244, 244))) {
+    printf("gazeNet::Detect() -- cudaPreImageNet failed\n");
+    return false;
+  }
+  if(CUDA_FAILED(cudaPreImageNet((float4*)leftEyeImage, 244, 244, mInputs[INPUT_LEFT_EYE].CUDA, 244, 244))) {
+    printf("gazeNet::Detect() -- cudaPreImageNet failed\n");
+    return false;
+  }
+  if(CUDA_FAILED(cudaPreImageNet((float4*)rightEyeImage, 244, 244, mInputs[INPUT_RIGHT_EYE].CUDA, 244, 244))) {
+    printf("gazeNet::Detect() -- cudaPreImageNet failed\n");
+    return false;
+  }
+  if(CUDA_FAILED(cudaMemcpy((float4*)mInputs[INPUT_FACE_GRID].CUDA, faceGrid, 25*25*sizeof(float), cudaMemcpyDeviceToDevice))) {
+    printf("gazeNet::Detect() -- cudaPreImageNet failed\n");
+    return false;
+  }
 
   void* inferenceBuffers[] = {
     mInputs[INPUT_FACE].CUDA,
@@ -162,7 +177,7 @@ bool gazeNet::Detect( float* faceImage, float* leftEyeImage, float* rightEyeImag
 
   gaze = mOutputs[OUTPUT_GAZE].CPU;
 
-  printf("predicted gaze %f, %f", gaze[0], gaze[1]);
+  printf("predicted gaze %f, %f\n", gaze[0], gaze[1]);
 
   return true;
 }

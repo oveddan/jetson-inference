@@ -36,6 +36,8 @@
 // #include "cudaGrayscale.h"
 #include "cudaOverlay.h"
 #include "cudaCrop.h"
+#include "cudaRGB.h"
+#include "cudaFaceGrid.h"
 #include "cudaResize.h"
 #include "cudaFont.h"
 #include "featureExtractor.h"
@@ -56,6 +58,7 @@ void sig_handler(int signo)
 	}
 }
 
+#define FACE_GRID_SIZE 25
 
 int main( int argc, char** argv )
 {
@@ -115,12 +118,16 @@ int main( int argc, char** argv )
   void* imgLeftEye = NULL;
   void* imgRightEyeCropped = NULL;
   void* imgRightEye = NULL;
-  float* faceGrid = NULL;
+  void* faceGrid = NULL;
+  void* faceGridCPU = NULL;
+  void* outputGrayscale = NULL;
+  void* outputRGBA = NULL;
 
   long cameraWidth = camera->GetWidth();
   long cameraHeight = camera->GetHeight();
   long cropImageSize = cameraWidth * cameraHeight * sizeof(float4);
   long resizeImageSize = 244 * 244 * sizeof(float4);
+  int faceGridSize = FACE_GRID_SIZE * FACE_GRID_SIZE * sizeof(float1);
 
   if(CUDA_FAILED(cudaMalloc((void**)&imgCropped, cropImageSize)))
   {
@@ -138,6 +145,21 @@ int main( int argc, char** argv )
     return 0;
   }
   if(CUDA_FAILED(cudaMalloc((void**)&imgRightEye, resizeImageSize)))
+  {
+    printf("gazecapture-camera:  failed to alloc output memory\n");
+    return 0;
+  }
+  if( !cudaAllocMapped(&faceGridCPU, &faceGrid, faceGridSize) )
+  {
+    printf("gazecapture-camera:  failed to alloc output memory\n");
+    return 0;
+  }
+  if(CUDA_FAILED(cudaMalloc((void**)&outputGrayscale, 244 * 244 * sizeof(float))))
+  {
+    printf("gazecapture-camera:  failed to alloc output memory\n");
+    return 0;
+  }
+  if(CUDA_FAILED(cudaMalloc((void**)&outputRGBA, 244 * 244 * sizeof(float4))))
   {
     printf("gazecapture-camera:  failed to alloc output memory\n");
     return 0;
@@ -226,53 +248,45 @@ int main( int argc, char** argv )
     if(face_boxes.size() > 0) {
       int numGazes = maxGazes;
 
+      rectangle face_box = face_boxes[0];
+
       cropAndResize(imgRGBA, width, height, imgCropped,
               face_boxes[0], detectionScale, imgFace, 244, 244);
-
       cropAndResize(imgRGBA, width, height, imgCropped,
               left_eye_boxes[0], detectionScale, imgLeftEye, 244, 244);
       cropAndResize(imgRGBA, width, height, imgCropped,
               right_eye_boxes[0], detectionScale, imgRightEye, 244, 244);
 
 
+      point center = dlib::center(face_box);
+      cudaFaceGrid(
+        (float*)faceGrid, width, height, FACE_GRID_SIZE, FACE_GRID_SIZE,
+        center.x() / detectionScale, center.y() / detectionScale,
+        face_box.width() / detectionScale, face_box.height() / detectionScale);
+
+      // print out face grid. todo: move to function
+      if(false) {
+        for(int i = 0; i < 25 * 25; i++) {
+          float* iptr = (float*) faceGridCPU;
+          std::cout << iptr[i] << " ";
+          if (i % 25 == 0)
+            std::cout << "\n";
+        }
+      }
 
       // classify image
-      if(false && net->Detect((float*)imgFace, (float*)imgLeftEye, (float*)imgRightEye, (float*)faceGrid,
+      if(net->Detect((float*)imgFace, (float*)imgLeftEye, (float*)imgRightEye, (float*)faceGrid,
             gazesCPU)) {
           printf("gaze detected");
       }
     }
 
-		// if( img_class >= 0 )
-		// {
-			// if( display != NULL )
-			// {
-				// char str[256];
-				// sprintf(str, "TensorRT build %x | %s | %04.1f FPS", NV_GIE_VERSION, net->HasFP16() ? "FP16" : "FP32", display->GetFPS());
-				// //sprintf(str, "TensorRT build %x | %s | %04.1f FPS | %05.2f%% %s", NV_GIE_VERSION, net->GetNetworkName(), display->GetFPS(), confidence * 100.0f, net->GetClassDesc(img_class));
-				// display->SetTitle(str);
-			// }
-		// }
-
-
-    // int numFaceBoxes = faces.size();
-    // for( int n=0; n < numFaceBoxes; n++ )
-    // {
-      // // rectangle face = faces[n];
-      // // float4 bb((float)face.left(), (float)face.bottom(), (float)face.right(), (float)face.top());
-      // // printf("bounding box %i   (%f, %f)  (%f, %f)  w=%f  h=%f\n", n, bb.x, bb.y, bb.z, bb.w, bb.z - bb.x, bb.w - bb.y);
-
-      // if( CUDA_FAILED(cudaRectOutlineOverlay((float*)imgRGBA, (float*)imgRGBA, camera->GetWidth(), camera->GetHeight(),
-                                // (float)face.left(), (float)face.bottom(), (float)face.right(), (float)face.top()) )) {
-        // printf("detectnet-console:  failed to draw boxes\n");
-
-        // // lastClass = nc;
-        // // lastStart = n;
-
-        // CUDA(cudaDeviceSynchronize());
-      // }
-    // }
-
+   if( display != NULL )
+    {
+      char str[256];
+      sprintf(str, "TensorRT build %x | %s | %04.1f FPS", NV_GIE_VERSION, net->HasFP16() ? "FP16" : "FP32", display->GetFPS());
+      display->SetTitle(str);
+    }
 
 		// update display
 		if( display != NULL )
@@ -301,6 +315,7 @@ int main( int argc, char** argv )
 
       if(faceTexture != NULL && face_boxes.size() > 0) {
 
+        // RENDER FACE
         // rescale image pixel intensities of face for display
         CUDA(cudaNormalizeRGBA((float4*)imgFace, make_float2(0.0f, 255.0f),
                    (float4*)imgFace, make_float2(0.0f, 1.0f),
@@ -315,13 +330,14 @@ int main( int argc, char** argv )
           faceTexture->Unmap();
         }
 
+
         // draw the texture
         faceTexture->Render(500,500);
 
+        // RENDER LEFT_EYE
         CUDA(cudaNormalizeRGBA((float4*)imgLeftEye, make_float2(0.0f, 255.0f),
                    (float4*)imgLeftEye, make_float2(0.0f, 1.0f),
                    244, 244));
-
 
         tex_map2 = faceTexture->MapCUDA();
 
@@ -334,6 +350,7 @@ int main( int argc, char** argv )
         // draw the texture
         faceTexture->Render(100,100);
 
+        // RENDER RIGHT EYE
         CUDA(cudaNormalizeRGBA((float4*)imgRightEye, make_float2(0.0f, 255.0f),
                    (float4*)imgRightEye, make_float2(0.0f, 1.0f),
                    244, 244));
@@ -350,6 +367,24 @@ int main( int argc, char** argv )
         // draw the texture
         faceTexture->Render(800,100);
 
+
+        // RENDER FACE GRID
+        CUDA(cudaResize((float*)faceGrid, 25, 25,
+                   (float*)outputGrayscale, 244, 244));
+
+       CUDA(cudaGrayscaleRGBAf((float*)outputGrayscale,
+          (float4*)outputRGBA, 244, 244));
+
+        tex_map2 = faceTexture->MapCUDA();
+
+        if( tex_map2 != NULL )
+        {
+          cudaMemcpy(tex_map2, outputRGBA, faceTexture->GetSize(), cudaMemcpyDeviceToDevice);
+          faceTexture->Unmap();
+        }
+
+        // draw the texture
+        faceTexture->Render(800,500);
       }
 
 			display->EndRender();

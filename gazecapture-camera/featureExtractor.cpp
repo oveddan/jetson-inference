@@ -52,7 +52,7 @@ void FeatureExtractor::extract(long height, long width, void* imgCPU,
   cv::Mat res;
   cv::resize(matPrevRGB, res, cv::Size(), detectionScale, detectionScale);
   std::time_t e = std::time(0);
-  printf("resize time: %f\n", float( clock () - begin_time ) / CLOCKS_PER_SEC);
+  // printf("resize time: %f\n", float( clock () - begin_time ) / CLOCKS_PER_SEC);
 
   begin_time = clock();
 
@@ -62,7 +62,7 @@ void FeatureExtractor::extract(long height, long width, void* imgCPU,
   for(unsigned long i = 0; i < faces.size(); i++) {
     shapes.push_back(pose_model(cimg, faces[i]));
   }
-  printf("faces, detect time: %lu %f\n", faces.size(), float( clock () - begin_time ) / CLOCKS_PER_SEC);
+  // printf("faces, detect time: %lu %f\n", faces.size(), float( clock () - begin_time ) / CLOCKS_PER_SEC);
 
   const rgb_pixel color = rgb_pixel(0,0,255);
 

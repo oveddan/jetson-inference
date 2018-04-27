@@ -42,6 +42,19 @@ __global__ void gpuNormalize( T* input, T* output, int width, int height, float 
 							  px.w * scaling_factor);
 }
 
+__global__ void gpuNormalizeSingle( float* input, float* output, int width, int height, float scaling_factor )
+{
+	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+	const int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if( x >= width || y >= height )
+		return;
+
+	const float px = input[ y * width + x ];
+
+	output[y*width+x] = px * scaling_factor;
+}
+
 
 // cudaNormalizeRGBA
 cudaError_t cudaNormalizeRGBA( float4* input, const float2& input_range,
@@ -64,6 +77,31 @@ cudaError_t cudaNormalizeRGBA( float4* input, const float2& input_range,
 
 	return CUDA(cudaGetLastError());
 }
+
+// cudaNormalize
+cudaError_t cudaNormalize( float* input, const float2& input_range,
+						 float* output, const float2& output_range,
+						 size_t  width,  size_t height )
+{
+	if( !input || !output )
+		return cudaErrorInvalidDevicePointer;
+
+	if( width == 0 || height == 0  )
+		return cudaErrorInvalidValue;
+
+	const float multiplier = output_range.y / input_range.y;
+
+	// launch kernel
+	const dim3 blockDim(8, 8);
+	const dim3 gridDim(iDivUp(width,blockDim.x), iDivUp(height,blockDim.y));
+
+	gpuNormalizeSingle<<<gridDim, blockDim>>>(input, output, width, height, multiplier);
+
+	return CUDA(cudaGetLastError());
+}
+
+
+
 
 
 
