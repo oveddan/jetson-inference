@@ -16,5 +16,23 @@ void cropAndResize(void* imgRGBA, long imageWidth, long imageHeight, void* imgCr
     cropBox.height() / cropBoxScale, (float4*)imgScaled, resizeWidth, resizeHeight);
 }
 
+float maxWidthCm = 10;
+float maxHeightCm = 5;
+int w = 1920;
+int h = 1080;
 
+float mapValue(float value, float istart, float istop, float ostart, float ostop) {
+  return ostart + (ostop - ostart) * ((value - istart) / (istop - istart));
+}
 
+int mapGazeX(float gazeX) {
+    return round(mapValue(gazeX, -maxWidthCm, maxWidthCm, 0, w));
+}
+
+int mapGazeY(float gazeY) {
+    return round(mapValue(gazeY, -2.5, -20, 0, h));
+}
+
+float2 toGazeCoords(float* gazeCm) {
+  return make_float2(mapGazeX(gazeCm[0]), mapGazeY(gazeCm[1]));
+}

@@ -40,6 +40,7 @@
 #include "cudaFaceGrid.h"
 #include "cudaResize.h"
 #include "cudaFont.h"
+#include "cudaDraw.h"
 #include "featureExtractor.h"
 #include "gazecapture-util.h"
 #include "gazeNet.h"
@@ -111,7 +112,6 @@ int main( int argc, char** argv )
 	const uint32_t maxGazes= net->GetMaxGazes();		printf("maximum gazes:  %u\n", maxGazes);
 
   float* gazesCPU    = NULL;
-	float* gazesCUDA   = NULL;
   void* imgCropped = NULL;
   void* imgFace = NULL;
   void* imgLeftEyeCropped = NULL;
@@ -129,6 +129,10 @@ int main( int argc, char** argv )
   long resizeImageSize = 244 * 244 * sizeof(float4);
   int faceGridSize = FACE_GRID_SIZE * FACE_GRID_SIZE * sizeof(float1);
 
+  if(CUDA_FAILED(cudaHostAlloc((void**)&gazesCPU, maxGazes*sizeof(float2), 0))) {
+    printf("gazecapture-camera:  failed to alloc output memory\n");
+    return 0;
+  }
   if(CUDA_FAILED(cudaMalloc((void**)&imgCropped, cropImageSize)))
   {
     printf("gazecapture-camera:  failed to alloc output memory\n");
@@ -245,6 +249,8 @@ int main( int argc, char** argv )
     featureExtractor.extract(height, width, imgCPU,
         face_boxes, left_eye_boxes, right_eye_boxes);
 
+    bool gazeDetected = false;
+
     if(face_boxes.size() > 0) {
       int numGazes = maxGazes;
 
@@ -277,6 +283,7 @@ int main( int argc, char** argv )
       // classify image
       if(net->Detect((float*)imgFace, (float*)imgLeftEye, (float*)imgRightEye, (float*)faceGrid,
             gazesCPU)) {
+        gazeDetected = true;
           printf("gaze detected");
       }
     }
@@ -296,10 +303,20 @@ int main( int argc, char** argv )
 
 			if( texture != NULL )
 			{
+        if (gazeDetected){
+          float2 gazeCoords = toGazeCoords((float*)gazesCPU);
+
+          printf("Gaze coords: %f %f \n", gazeCoords.x, gazeCoords.y);
+
+          cudaDrawCircle((float4*)imgRGBA, (float4*)imgRGBA,
+              width, height, gazeCoords.x, gazeCoords.y, 5.0f,
+              make_float3(255.0, 0.0, 0.0));
+        }
+
 				// rescale image pixel intensities for display
 				CUDA(cudaNormalizeRGBA((float4*)imgRGBA, make_float2(0.0f, 255.0f),
 								   (float4*)imgRGBA, make_float2(0.0f, 1.0f),
-		 						   camera->GetWidth(), camera->GetHeight()));
+		 						   width, height));
 
 				// map from CUDA to openGL using GL interop
 				void* tex_map = texture->MapCUDA();
@@ -314,25 +331,7 @@ int main( int argc, char** argv )
       }
 
       if(faceTexture != NULL && face_boxes.size() > 0) {
-
-        // RENDER FACE
-        // rescale image pixel intensities of face for display
-        CUDA(cudaNormalizeRGBA((float4*)imgFace, make_float2(0.0f, 255.0f),
-                   (float4*)imgFace, make_float2(0.0f, 1.0f),
-                   244, 244));
-
-
-        void* tex_map2 = faceTexture->MapCUDA();
-
-        if( tex_map2 != NULL )
-        {
-          cudaMemcpy(tex_map2, imgFace, faceTexture->GetSize(), cudaMemcpyDeviceToDevice);
-          faceTexture->Unmap();
-        }
-
-
-        // draw the texture
-        faceTexture->Render(500,500);
+        void* tex_map2;
 
         // RENDER LEFT_EYE
         CUDA(cudaNormalizeRGBA((float4*)imgLeftEye, make_float2(0.0f, 255.0f),
@@ -350,7 +349,26 @@ int main( int argc, char** argv )
         // draw the texture
         faceTexture->Render(100,100);
 
-        // RENDER RIGHT EYE
+        // RENDER FACE
+        // rescale image pixel intensities of face for display
+        CUDA(cudaNormalizeRGBA((float4*)imgFace, make_float2(0.0f, 255.0f),
+                   (float4*)imgFace, make_float2(0.0f, 1.0f),
+                   244, 244));
+
+
+        tex_map2 = faceTexture->MapCUDA();
+
+        if( tex_map2 != NULL )
+        {
+          cudaMemcpy(tex_map2, imgFace, faceTexture->GetSize(), cudaMemcpyDeviceToDevice);
+          faceTexture->Unmap();
+        }
+
+
+        // draw the texture
+        faceTexture->Render(100 + 244,100);
+
+       // RENDER RIGHT EYE
         CUDA(cudaNormalizeRGBA((float4*)imgRightEye, make_float2(0.0f, 255.0f),
                    (float4*)imgRightEye, make_float2(0.0f, 1.0f),
                    244, 244));
@@ -365,7 +383,7 @@ int main( int argc, char** argv )
         }
 
         // draw the texture
-        faceTexture->Render(800,100);
+        faceTexture->Render(100+244*2,100);
 
 
         // RENDER FACE GRID
@@ -384,7 +402,7 @@ int main( int argc, char** argv )
         }
 
         // draw the texture
-        faceTexture->Render(800,500);
+        faceTexture->Render(100+244*3,100);
       }
 
 			display->EndRender();

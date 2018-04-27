@@ -25,12 +25,12 @@ rectangle get_bounding_box(const full_object_detection &d, unsigned long first_l
   return rectangle(left, top, right, bottom);
 };
 
-rectangle to_square(const rectangle &rect) {
+rectangle to_square(const rectangle &rect, float scale=1.0) {
   point center = dlib::center(rect);
 
   long width = rect.right() - rect.left();
   long height = rect.top() - rect.bottom();
-  long size = std::max(width, height);
+  long size = std::max(width, height) * scale;
 
   return dlib::centered_rect(
     center.x(), center.y(), size, size
@@ -70,7 +70,7 @@ void FeatureExtractor::extract(long height, long width, void* imgCPU,
     const full_object_detection& d = shapes[i];
 
     rectangle left_eye_box = to_square(get_bounding_box(d, 36, 41));
-    rectangle right_eye_box = to_square(get_bounding_box(d, 42, 47));
+    rectangle right_eye_box = to_square(get_bounding_box(d, 42, 47), 1.5);
 
     face_boxes.push_back(to_square(faces[i]));
     left_eye_boxes.push_back(left_eye_box);

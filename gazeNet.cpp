@@ -39,7 +39,11 @@ const char* DEFAULT_MEAN_RIGHT = "networks/gaze-capture/mean_right_224.mat";
 #define OUTPUT_GAZE 0
 
 // constructor
-gazeNet::gazeNet() : tensorNet()
+gazeNet::gazeNet() :
+  meanFace(make_float3(118.74723, 129.16585, 113.75103)),
+  meanLeftEye(make_float3(114.61925, 102.43724, 127.923225)),
+  meanRightEye(make_float3(108.997314, 97.88837, 123.50221)),
+  tensorNet()
 {
 }
 
@@ -136,21 +140,21 @@ bool gazeNet::init(const char* prototxt_path, const char* model_path, const char
 
 
 // from gazeNet.cu
-cudaError_t cudaPreImageNet( float4* input, size_t inputWidth, size_t inputHeight, float* output, size_t outputWidth, size_t outputHeight);
+cudaError_t cudaPreImageNetMean( float4* input, size_t inputWidth, size_t inputHeight, float* output, size_t outputWidth, size_t outputHeight, const float3& mean_value);
 
 bool gazeNet::Detect( float* faceImage, float* leftEyeImage, float* rightEyeImage,
       float* faceGrid, float* gaze) {
 
 
-  if(CUDA_FAILED(cudaPreImageNet((float4*)faceImage, 244, 244, mInputs[INPUT_FACE].CUDA, 244, 244))) {
+  if(CUDA_FAILED(cudaPreImageNetMean((float4*)faceImage, 244, 244, mInputs[INPUT_FACE].CUDA, 244, 244, meanFace))) {
+      printf("gazeNet::Detect() -- cudaPreImageNet failed\n");
+      return false;
+  }
+  if(CUDA_FAILED(cudaPreImageNetMean((float4*)leftEyeImage, 244, 244, mInputs[INPUT_LEFT_EYE].CUDA, 244, 244, meanLeftEye))) {
     printf("gazeNet::Detect() -- cudaPreImageNet failed\n");
     return false;
   }
-  if(CUDA_FAILED(cudaPreImageNet((float4*)leftEyeImage, 244, 244, mInputs[INPUT_LEFT_EYE].CUDA, 244, 244))) {
-    printf("gazeNet::Detect() -- cudaPreImageNet failed\n");
-    return false;
-  }
-  if(CUDA_FAILED(cudaPreImageNet((float4*)rightEyeImage, 244, 244, mInputs[INPUT_RIGHT_EYE].CUDA, 244, 244))) {
+  if(CUDA_FAILED(cudaPreImageNetMean((float4*)rightEyeImage, 244, 244, mInputs[INPUT_RIGHT_EYE].CUDA, 244, 244, meanRightEye))) {
     printf("gazeNet::Detect() -- cudaPreImageNet failed\n");
     return false;
   }
@@ -175,7 +179,17 @@ bool gazeNet::Detect( float* faceImage, float* leftEyeImage, float* rightEyeImag
 
   PROFILER_REPORT();
 
-  gaze = mOutputs[OUTPUT_GAZE].CPU;
+  float* outputGaze = mOutputs[OUTPUT_GAZE].CPU;
+  // if(CUDA_FAILED(cudaMemcpy(gaze, mOutputs[OUTPUT_GAZE].CPU, 2*maxBatchSize*sizeof(float2), cudaMemcpyHostToHost))) {
+    // printf("gazeNet::Detect() -- cudaCopy failed\n");
+    // return false;
+  // }
+
+  for(uint32_t i = 0; i <maxBatchSize; i++) {
+    printf("%i", i);
+    gaze[i * 2] = outputGaze[i * 2];
+    gaze[i * 2 + 1] = outputGaze[i * 2 + 1];
+  }
 
   printf("predicted gaze %f, %f\n", gaze[0], gaze[1]);
 

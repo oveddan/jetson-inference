@@ -25,6 +25,7 @@
 
 
 #include "tensorNet.h"
+#include "cudaUtility.h"
 
 const int GAZE_IMAGE_DIM = 224;
 const int GAZE_FACE_GRID_DIM = 25;
@@ -77,6 +78,9 @@ protected:
   const char* mean_left_binary, const char* mean_right_binary, uint32_t maxBatchSize );
 
   uint32_t maxBatchSize;
+  const float3 meanFace;
+  const float3 meanLeftEye;
+  const float3 meanRightEye;
 };
 
 
