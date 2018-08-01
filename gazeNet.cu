@@ -87,9 +87,9 @@ __global__ void gpuPreImageNetMean( float2 scale, float4* input, int iWidth, flo
 	const float4 px  = input[ dy * iWidth + dx ];
 	const float3 bgr = make_float3(px.z - mean_value.x, px.y - mean_value.y, px.x - mean_value.z);
 	
-	output[n * 0 + y * oWidth + x] = bgr.x;
-	output[n * 1 + y * oWidth + x] = bgr.y;
-	output[n * 2 + y * oWidth + x] = bgr.z;
+	output[y * oWidth + x] = bgr.x;
+	output[y * oWidth + x + 1] = bgr.y;
+	output[y * oWidth + x + 2] = bgr.z;
 }
 
 
